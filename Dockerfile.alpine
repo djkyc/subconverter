@@ -1,37 +1,34 @@
 # ----------------------------------------------------------
-# 第一阶段：构建环境（Ubuntu 22.04）
+# 第一阶段：构建环境（Alpine）
 # ----------------------------------------------------------
-FROM ubuntu:22.04 AS builder
+FROM alpine:latest AS builder
 
-ENV DEBIAN_FRONTEND=noninteractive
-
-# 更换为国内源（可选，如果网络没问题可以注释掉下面两行）
-RUN sed -i 's/archive.ubuntu.com/mirrors.ustc.edu.cn/g' /etc/apt/sources.list && \
-    sed -i 's/security.ubuntu.com/mirrors.ustc.edu.cn/g' /etc/apt/sources.list
-
-# 安装编译依赖（添加 pkg-config 和 toml11）
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# 安装 Alpine 下的编译依赖
+RUN apk add --no-cache \
     git \
     cmake \
     g++ \
     make \
-    pkg-config \
-    libssl-dev \
-    libpcre3-dev \
-    zlib1g-dev \
-    libcurl4-openssl-dev \
-    libyaml-cpp-dev \
+    pkgconfig \
+    openssl-dev \
+    pcre-dev \
+    zlib-dev \
+    curl-dev \
+    yaml-cpp-dev \
     rapidjson-dev \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+    linux-headers
 
-# toml11 是一个 header-only 库，Ubuntu 22.04 官方仓库不包含，需要手动安装
+# 正确安装 toml11（通过 CMake 编译安装以生成 CMake 配置文件）
 RUN git clone --depth 1 https://github.com/ToruNiina/toml11.git /tmp/toml11 && \
-    cp -r /tmp/toml11/include/toml11 /usr/local/include/
+    cd /tmp/toml11 && \
+    mkdir build && cd build && \
+    cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local && \
+    make install && \
+    rm -rf /tmp/toml11
 
 WORKDIR /app
 
-# 克隆你的项目（如果已经在 repo 中，可以改用 COPY . .，但这里保持原样）
+# 克隆项目源码
 RUN git clone https://github.com/asdlokj1qpi233/subconverter.git .
 
 # 编译（动态链接）
@@ -45,16 +42,23 @@ FROM alpine:latest
 # 安装运行时动态库
 RUN apk add --no-cache \
     ca-certificates \
-    libssl3 \
-    libpcrecpp \
+    openssl \
+    pcre \
     zlib \
     libcurl \
-    yaml-cpp
+    yaml-cpp \
+    tzdata
 
-# 复制二进制文件
-COPY --from=builder /app/subconverter /subconverter
-
+# 创建并切换到工作目录
 WORKDIR /subconverter
+
+# 1. 复制编译好的二进制文件到当前目录
+COPY --from=builder /app/subconverter ./subconverter
+
+# 2. 关键：将运行必需的配置目录和文件一同复制进来！
+COPY --from=builder /app/base ./base
+COPY --from=builder /app/config ./config
+COPY --from=builder /app/generate.ini ./generate.ini
 
 EXPOSE 25500
 
