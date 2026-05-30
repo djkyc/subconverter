@@ -1,26 +1,35 @@
 # ==========================================
-# 第一阶段：构建环境（全 Alpine 架构，完美兼容多平台）
+# 第一阶段：构建环境（使用 Ubuntu 22.04，就地编译底层依赖）
 # ==========================================
-FROM alpine:latest AS builder
+FROM ubuntu:22.04 AS builder
 
-# 1. 安装 Alpine 下的编译依赖（已补充 quickjs-dev 解决最新的 CMake 报错）
-RUN apk add --no-cache \
+# 避免 apt 安装过程中出现交互式提示
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 1. 安装 Ubuntu 下的基础标准编译依赖
+RUN apt-get update && apt-get install -y \
     git \
     cmake \
     g++ \
     make \
-    pkgconfig \
-    openssl-dev \
-    pcre-dev \
-    pcre2-dev \
-    zlib-dev \
-    curl-dev \
-    yaml-cpp-dev \
-    rapidjson-dev \
-    linux-headers \
-    quickjs-dev
+    pkg-config \
+    libssl-dev \
+    libpcre3-dev \
+    libpcre2-dev \
+    zlib1g-dev \
+    libcurl4-openssl-dev \
+    libyaml-cpp-dev \
+    librapidjson-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-# 2. 编译并安装 toml11，确保生成 CMake 路由文件
+# 2. 【核心修复】手动编译并安装 QuickJS，彻底解决多架构找不到库的问题
+RUN git clone --depth 1 https://github.com/bellard/quickjs.git /tmp/quickjs && \
+    cd /tmp/quickjs && \
+    make -j$(nproc) && \
+    make install && \
+    rm -rf /tmp/quickjs
+
+# 3. 编译并安装 toml11，确保生成 CMake 路由文件
 RUN git clone --depth 1 https://github.com/ToruNiina/toml11.git /tmp/toml11 && \
     cd /tmp/toml11 && \
     mkdir build && cd build && \
@@ -30,36 +39,39 @@ RUN git clone --depth 1 https://github.com/ToruNiina/toml11.git /tmp/toml11 && \
 
 WORKDIR /app
 
-# 3. 带上 --recursive 完整拉取带有子模块的复杂源码
+# 4. 完整拉取该魔改版源码及所有子模块
 RUN git clone --recursive https://github.com/asdlokj1qpi233/subconverter.git .
 
-# 4. 限制并发数为 2 (-j2)，防止 GitHub Actions 模拟多架构时内存爆炸 (OOM)
+# 5. 限制并发数为 2 (-j2)，防止 GitHub Actions 模拟 ARM 架构时内存爆炸 (OOM)
 RUN cmake . && make -j2
 
 
 # ==========================================
-# 第二阶段：运行环境（极简 Alpine 镜像）
+# 第二阶段：运行环境（使用 Ubuntu 22.04 确保动态链接库完美兼容）
 # ==========================================
-FROM alpine:latest
+FROM ubuntu:22.04
 
-# 1. 安装运行时必需的动态库（包含 pcre2 和 quickjs）
-RUN apk add --no-cache \
+# 避免 apt 安装过程中出现交互式提示
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 1. 安装运行时必需的标准动态库
+RUN apt-get update && apt-get install -y \
     ca-certificates \
-    openssl \
-    pcre \
-    pcre2 \
-    zlib \
-    libcurl \
-    yaml-cpp \
+    libssl3 \
+    libpcre3 \
+    libpcre2-8-0 \
+    zlib1g \
+    libcurl4 \
+    libyaml-cpp0.7 \
     tzdata \
-    quickjs
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /subconverter
 
 # 2. 复制编译好的核心二进制程序
 COPY --from=builder /app/subconverter ./subconverter
 
-# 3. 复制程序运行强依赖的配置目录和文件
+# 3. 复制程序运行强依赖的配置目录和文件（确保新协议规则正常加载）
 COPY --from=builder /app/base ./base
 COPY --from=builder /app/config ./config
 COPY --from=builder /app/generate.ini ./generate.ini
