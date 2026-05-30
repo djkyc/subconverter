@@ -1,12 +1,15 @@
-# 第一阶段：构建环境 (Ubuntu 22.04)
+# ----------------------------------------------------------
+# 第一阶段：构建环境（Ubuntu 22.04）
+# ----------------------------------------------------------
 FROM ubuntu:22.04 AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# 使用国内源加速（可选，如果网络好可以注释掉）
+# 更换为国内源（可选，如果网络没问题可以注释掉下面两行）
 RUN sed -i 's/archive.ubuntu.com/mirrors.ustc.edu.cn/g' /etc/apt/sources.list && \
     sed -i 's/security.ubuntu.com/mirrors.ustc.edu.cn/g' /etc/apt/sources.list
 
+# 安装编译依赖（添加 pkg-config 和 toml11）
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     cmake \
@@ -22,15 +25,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
+# toml11 是一个 header-only 库，Ubuntu 22.04 官方仓库不包含，需要手动安装
+RUN git clone --depth 1 https://github.com/ToruNiina/toml11.git /tmp/toml11 && \
+    cp -r /tmp/toml11/include/toml11 /usr/local/include/
+
 WORKDIR /app
 
+# 克隆你的项目（如果已经在 repo 中，可以改用 COPY . .，但这里保持原样）
 RUN git clone https://github.com/asdlokj1qpi233/subconverter.git .
 
+# 编译（动态链接）
 RUN cmake . && make -j$(nproc)
 
-# 第二阶段：运行时 Alpine
+# ----------------------------------------------------------
+# 第二阶段：运行环境（Alpine 最小镜像）
+# ----------------------------------------------------------
 FROM alpine:latest
 
+# 安装运行时动态库
 RUN apk add --no-cache \
     ca-certificates \
     libssl3 \
@@ -39,6 +51,7 @@ RUN apk add --no-cache \
     libcurl \
     yaml-cpp
 
+# 复制二进制文件
 COPY --from=builder /app/subconverter /subconverter
 
 WORKDIR /subconverter
