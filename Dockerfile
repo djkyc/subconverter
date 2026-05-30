@@ -1,6 +1,69 @@
-FROM asdlokj1qpi23/subconverter:latest
+# ==========================================
+# 第一阶段：构建环境（全 Alpine 架构，完美兼容多平台）
+# ==========================================
+FROM alpine:latest AS builder
 
-# 如果你想添加自己的配置文件或其他文件，可以在这里 COPY
-# 否则，这个文件只需要这一行即可
+# 1. 安装 Alpine 下的编译依赖（包含 pcre2-dev 解决 CMake 报错）
+RUN apk add --no-cache \
+    git \
+    cmake \
+    g++ \
+    make \
+    pkgconfig \
+    openssl-dev \
+    pcre-dev \
+    pcre2-dev \
+    zlib-dev \
+    curl-dev \
+    yaml-cpp-dev \
+    rapidjson-dev \
+    linux-headers
 
+# 2. 编译并安装 toml11，确保生成 CMake 路由文件
+RUN git clone --depth 1 https://github.com/ToruNiina/toml11.git /tmp/toml11 && \
+    cd /tmp/toml11 && \
+    mkdir build && cd build && \
+    cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local && \
+    make install && \
+    rm -rf /tmp/toml11
+
+WORKDIR /app
+
+# 3. 【关键修复 1】带上 --recursive 完整拉取带有子模块的复杂源码
+RUN git clone --recursive https://github.com/asdlokj1qpi233/subconverter.git .
+
+# 4. 【关键修复 2】限制并发数为 2 (-j2)，防止 GitHub Actions 模拟多架构时内存爆炸 (OOM) 导致 exit code 1
+RUN cmake . && make -j2
+
+
+# ==========================================
+# 第二阶段：运行环境（极简 Alpine 镜像）
+# ==========================================
+FROM alpine:latest
+
+# 1. 安装运行时必需的动态库（包含 pcre2）
+RUN apk add --no-cache \
+    ca-certificates \
+    openssl \
+    pcre \
+    pcre2 \
+    zlib \
+    libcurl \
+    yaml-cpp \
+    tzdata
+
+WORKDIR /subconverter
+
+# 2. 复制编译好的核心二进制程序
+COPY --from=builder /app/subconverter ./subconverter
+
+# 3. 复制程序运行强依赖的配置目录和文件（防止启动闪退）
+COPY --from=builder /app/base ./base
+COPY --from=builder /app/config ./config
+COPY --from=builder /app/generate.ini ./generate.ini
+
+# 暴露服务端口
 EXPOSE 25500
+
+# 启动命令
+ENTRYPOINT ["./subconverter"]
