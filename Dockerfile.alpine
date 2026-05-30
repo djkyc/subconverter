@@ -3,7 +3,7 @@
 # ==========================================
 FROM alpine:latest AS builder
 
-# 安装 Alpine 下的编译依赖（已补充 pcre2-dev 解决 CMake 报错）
+# 安装 Alpine 下的编译依赖（包含 pcre2-dev）
 RUN apk add --no-cache \
     git \
     cmake \
@@ -29,8 +29,8 @@ RUN git clone --depth 1 https://github.com/ToruNiina/toml11.git /tmp/toml11 && \
 
 WORKDIR /app
 
-# 复制工作流 check out 的项目源码到容器内
-COPY . .
+# 【关键修复】直接从 GitHub 拉取 subconverter 源码，而不是 COPY 本地文件
+RUN git clone https://github.com/asdlokj1qpi233/subconverter.git .
 
 # 编译项目（动态链接）
 RUN cmake . && make -j$(nproc)
