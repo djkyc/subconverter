@@ -1,52 +1,47 @@
-# 第一阶段：构建环境
-FROM ubuntu:22.04 AS builder
+# 第一阶段：构建环境（Alpine 作为编译镜像）
+FROM alpine:latest AS builder
 
 LABEL maintainer="your-email@example.com"
 
-# 更换 apt 源为国内源，加快构建速度（可选）
-RUN sed -i 's/archive.ubuntu.com/mirrors.ustc.edu.cn/g' /etc/apt/sources.list && \
-    sed -i 's/security.ubuntu.com/mirrors.ustc.edu.cn/g' /etc/apt/sources.list
-
-# 安装编译所需工具
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# 安装编译工具链和依赖库
+RUN apk add --no-cache \
     git \
     cmake \
-    build-essential \
-    libssl-dev \
-    libpcre3-dev \
-    zlib1g-dev \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+    g++ \
+    make \
+    openssl-dev \
+    pcre-dev \
+    zlib-dev \
+    linux-headers \
+    ca-certificates
 
 WORKDIR /app
 
-# 克隆你想打包的项目
+# 克隆你想要打包的项目
 RUN git clone https://github.com/asdlokj1qpi233/subconverter.git .
 
-# 执行编译
+# 编译项目（静态链接，避免运行时缺少 .so 文件）
 RUN cd subconverter \
-    && cmake . \
+    && cmake -DCMAKE_EXE_LINKER_FLAGS="-static" . \
     && make -j$(nproc)
 
-# 第二阶段：运行环境
-FROM ubuntu:22.04
+# 第二阶段：运行环境（最小的 Alpine 镜像）
+FROM alpine:latest
 
-# 更换 apt 源（可选，保持与第一阶段一致）
-RUN sed -i 's/archive.ubuntu.com/mirrors.ustc.edu.cn/g' /etc/apt/sources.list && \
-    sed -i 's/security.ubuntu.com/mirrors.ustc.edu.cn/g' /etc/apt/sources.list
-
-# 安装运行时动态库依赖
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# 安装必要的运行时动态库（如果你不想完全静态链接，这里保留）
+# 注意：如果上面编译时使用了 -static，则下面的依赖可以省略
+RUN apk add --no-cache \
     ca-certificates \
-    libssl-dev \
-    libpcre3-dev \
-    zlib1g-dev \
-    && rm -rf /var/lib/apt/lists/*
+    libssl3 \
+    libpcrecpp \
+    zlib
 
-# 从 builder 阶段复制编译好的产物
-COPY --from=builder /app/subconverter /subconverter
+# 从构建阶段复制编译好的二进制文件
+COPY --from=builder /app/subconverter/subconverter /subconverter
 
 WORKDIR /subconverter
 
-# 直接运行主程序（subconverter）
+# 暴露默认端口（根据项目实际修改，subconverter 默认是 25500）
+EXPOSE 25500
+
 ENTRYPOINT ["./subconverter"]
