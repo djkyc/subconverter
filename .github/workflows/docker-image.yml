@@ -56,7 +56,7 @@ jobs:
         with:
           context: .
           # 🚨【注意】如果你的 Dockerfile 名字叫 Dockerfile.alpine，请把下面这行改成 ./Dockerfile.alpine
-          file: ./Dockerfile
+          file: ./Dockerfile.alpine
           # 🚀【全架构支持】严格指定三个主流架构：电脑、N1盒子(arm64)、老路由(armv7)
           platforms: linux/amd64,linux/arm64,linux/arm/v7
           push: true
