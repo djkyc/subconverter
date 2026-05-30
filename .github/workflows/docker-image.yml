@@ -1,4 +1,4 @@
-name: Pull Official SubConverter and Push to GHCR
+name: asdlokj1qpi23 SubConverter 
 
 on:
   # 🚨 已经删除了定时任务和代码推送触发，现在【仅支持手动触发】
