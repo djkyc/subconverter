@@ -1,0 +1,52 @@
+name: Auto Build from Upstream
+
+on:
+  # 定时任务：每天 UTC 时间 0 点（北京时间早 8 点）运行一次
+  schedule:
+    - cron: '0 0 * * *'
+  # 手动触发：允许你随时在 Actions 页面点击按钮运行
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 关键步骤：比较上游镜像的 digest，判断是否有更新
+      - name: Get upstream image digest
+        id: get_digest
+        run: |
+          UPSTREAM_DIGEST=$(docker manifest inspect asdlokj1qpi23/subconverter:latest | jq -r '.config.digest')
+          echo "Upstream digest: $UPSTREAM_DIGEST"
+          echo "digest=$UPSTREAM_DIGEST" >> $GITHUB_OUTPUT
+
+      # 如果发现有更新，才触发完整的构建与推送流程
+      - name: Build and push if updated
+        if: steps.get_digest.outputs.digest != '' && github.event_name != 'schedule' # 定时任务总是触发构建
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: linux/amd64, linux/arm64, linux/arm/v7
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
