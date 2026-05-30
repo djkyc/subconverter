@@ -1,67 +1,81 @@
-name: Build and Push Multi-Arch Docker Image to GHCR
+name: Auto Update from Upstream
 
 on:
-  push:
-    branches: [ master, main ]
-    tags: [ 'v*.*.*' ]
-  workflow_dispatch:
-  # 当“Sync with Upstream”工作流运行成功时，自动触发此工作流
-  workflow_run:
-    workflows: ["Sync with Upstream"]
-    types:
-      - completed
+  schedule:
+    # 使用 UTC 时间，示例为每天凌晨 1 点运行，你可以根据需要修改
+    - cron: '0 1 * * *'
+  workflow_dispatch: # 允许手动触发
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  UPSTREAM_IMAGE: asdlokj1qpi23/subconverter:latest
 
 jobs:
-  build:
+  check-and-build:
     runs-on: ubuntu-latest
-    # 只有在正常的 push、手动触发，或者同步上游成功时才执行
-    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     permissions:
       contents: read
       packages: write
 
     steps:
-      - name: Checkout code
+      # 1. 获取当前本地镜像（目标镜像）和上游镜像的 digest 值
+      - name: Get digests
+        id: get_digest
+        run: |
+          echo "Getting current digest for $IMAGE_NAME:latest"
+          set +e
+          # 尝试获取本地镜像清单，如果不存在或失败，则继续
+          LOCAL_MANIFEST=$(docker manifest inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest 2>/dev/null)
+          if [ $? -eq 0 ]; then
+            LOCAL_DIGEST=$(echo "$LOCAL_MANIFEST" | jq -r '.config.digest')
+          else
+            LOCAL_DIGEST=""
+          fi
+          set -e
+
+          echo "Getting current digest for $UPSTREAM_IMAGE"
+          UPSTREAM_MANIFEST=$(docker manifest inspect ${{ env.UPSTREAM_IMAGE }})
+          UPSTREAM_DIGEST=$(echo "$UPSTREAM_MANIFEST" | jq -r '.config.digest')
+          
+          echo "local_digest=$LOCAL_DIGEST" >> $GITHUB_OUTPUT
+          echo "upstream_digest=$UPSTREAM_DIGEST" >> $GITHUB_OUTPUT
+          echo "Local digest: $LOCAL_DIGEST"
+          echo "Upstream digest: $UPSTREAM_DIGEST"
+
+      # 2. 如果 digest 不同，则更新本地代码库
+      - name: Update Local Repository
+        if: steps.get_digest.outputs.local_digest != steps.get_digest.outputs.upstream_digest
         uses: actions/checkout@v4
 
+      # 3. 设置 QEMU 以支持多架构构建
       - name: Set up QEMU
+        if: steps.get_digest.outputs.local_digest != steps.get_digest.outputs.upstream_digest
         uses: docker/setup-qemu-action@v3
 
+      # 4. 设置 Docker Buildx
       - name: Set up Docker Buildx
+        if: steps.get_digest.outputs.local_digest != steps.get_digest.outputs.upstream_digest
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to GitHub Container Registry
+      # 5. 登录 GitHub Container Registry
+      - name: Log in to GHCR
+        if: steps.get_digest.outputs.local_digest != steps.get_digest.outputs.upstream_digest
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (tags, labels)
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || github.event_name == 'workflow_run' }}
-            type=semver,pattern={{version}}
-            type=sha,prefix={{branch}}-
-
-      - name: Build and push multi-arch image
+      # 6. 构建并推送新镜像
+      - name: Build and push
+        if: steps.get_digest.outputs.local_digest != steps.get_digest.outputs.upstream_digest
         uses: docker/build-push-action@v5
         with:
           context: .
-          # 🚨【注意】如果你的 Dockerfile 名字叫 Dockerfile.alpine，请把下面这行改成 ./Dockerfile.alpine
-          file: ./Dockerfile.alpine
-          # 🚀【全架构支持】严格指定三个主流架构：电脑、N1盒子(arm64)、老路由(armv7)
-          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          file: ./Dockerfile # 确保这里指向你的 Dockerfile
+          platforms: linux/amd64, linux/arm64, linux/arm/v7
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          # 💡【新增优化】清理编译缓存，防止多架构并发时交叉污染
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$(date +%Y%m%d-%H%M%S)
