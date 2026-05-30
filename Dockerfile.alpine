@@ -3,7 +3,7 @@ FROM alpine:latest AS builder
 
 LABEL maintainer="your-email@example.com"
 
-# 安装编译工具链和依赖库（包括 curl）
+# 安装所有编译依赖
 RUN apk add --no-cache \
     git \
     cmake \
@@ -13,30 +13,33 @@ RUN apk add --no-cache \
     pcre-dev \
     zlib-dev \
     curl-dev \
+    yaml-cpp-dev \
+    rapidjson-dev \
+    toml11-dev \
     linux-headers \
     ca-certificates
 
 WORKDIR /app
 
-# 克隆源代码到当前目录
+# 克隆源代码
 RUN git clone https://github.com/asdlokj1qpi233/subconverter.git .
 
-# 编译项目（动态链接，先保证能编译通过）
-RUN cmake . \
-    && make -j$(nproc)
+# 编译（动态链接）
+RUN cmake . && make -j$(nproc)
 
 # 第二阶段：运行环境
 FROM alpine:latest
 
-# 运行时依赖（与编译时的动态库对应）
+# 安装运行时动态库
 RUN apk add --no-cache \
     ca-certificates \
     libssl3 \
     libpcrecpp \
     zlib \
-    libcurl
+    libcurl \
+    yaml-cpp
 
-# 从构建阶段复制编译好的二进制文件
+# 复制编译好的二进制
 COPY --from=builder /app/subconverter /subconverter
 
 WORKDIR /subconverter
