@@ -1,21 +1,18 @@
-# ----------------------------------------------------------
-# 第一阶段：构建环境 (使用 Ubuntu 22.04 来完全规避 Alpine 依赖问题)
-# ----------------------------------------------------------
+# 第一阶段：构建环境 (Ubuntu 22.04)
 FROM ubuntu:22.04 AS builder
 
-# 设置非交互式安装，避免时区配置等提示
 ENV DEBIAN_FRONTEND=noninteractive
 
-# 更换为国内源，加速下载 (可选，如无需加速可删除这两行 sed)
+# 使用国内源加速（可选，如果网络好可以注释掉）
 RUN sed -i 's/archive.ubuntu.com/mirrors.ustc.edu.cn/g' /etc/apt/sources.list && \
     sed -i 's/security.ubuntu.com/mirrors.ustc.edu.cn/g' /etc/apt/sources.list
 
-# 安装所有编译所需的依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     cmake \
     g++ \
     make \
+    pkg-config \
     libssl-dev \
     libpcre3-dev \
     zlib1g-dev \
@@ -27,18 +24,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# 克隆 subconverter 源代码
 RUN git clone https://github.com/asdlokj1qpi233/subconverter.git .
 
-# 编译项目 (动态链接)
 RUN cmake . && make -j$(nproc)
 
-# ----------------------------------------------------------
-# 第二阶段：运行环境 (使用最小化的 Alpine)
-# ----------------------------------------------------------
+# 第二阶段：运行时 Alpine
 FROM alpine:latest
 
-# 安装运行时所需的动态库
 RUN apk add --no-cache \
     ca-certificates \
     libssl3 \
@@ -47,7 +39,6 @@ RUN apk add --no-cache \
     libcurl \
     yaml-cpp
 
-# 从构建阶段复制编译好的二进制文件和配置文件模板
 COPY --from=builder /app/subconverter /subconverter
 
 WORKDIR /subconverter
