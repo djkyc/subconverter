@@ -5,7 +5,7 @@ on:
     branches: [ master, main ]
     tags: [ 'v*.*.*' ]
   workflow_dispatch:
-  # 👇 【新增触发条件】当“Sync with Upstream”工作流运行结束时，触发此工作流
+  # 当“Sync with Upstream”工作流运行成功时，自动触发此工作流
   workflow_run:
     workflows: ["Sync with Upstream"]
     types:
@@ -18,7 +18,7 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # 👇 【新增判断】如果是被同步脚本触发的，只有同步成功（success）才执行打包；如果是正常的 push/手动触发，直接执行
+    # 只有在正常的 push、手动触发，或者同步上游成功时才执行
     if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     permissions:
       contents: read
@@ -55,8 +55,13 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./Dockerfile.alpine
-          platforms: linux/amd64, linux/arm64, linux/arm/v7
+          # 🚨【注意】如果你的 Dockerfile 名字叫 Dockerfile.alpine，请把下面这行改成 ./Dockerfile.alpine
+          file: ./Dockerfile
+          # 🚀【全架构支持】严格指定三个主流架构：电脑、N1盒子(arm64)、老路由(armv7)
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # 💡【新增优化】清理编译缓存，防止多架构并发时交叉污染
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
