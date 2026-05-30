@@ -1,46 +1,62 @@
-name: Pull Official SubConverter and Push to GHCR
+name: Build and Push Multi-Arch Docker Image to GHCR
 
 on:
-  workflow_dispatch:          # 手动触发
-  schedule:
-    - cron: '0 0 * * 0'       # 可选：每周同步一次官方最新版本
   push:
-    branches: [ master, main ] # 可选：当您修改 Dockerfile 时自动构建
+    branches: [ master, main ]
+    tags: [ 'v*.*.*' ]
+  workflow_dispatch:
+  # 👇 【新增触发条件】当“Sync with Upstream”工作流运行结束时，触发此工作流
+  workflow_run:
+    workflows: ["Sync with Upstream"]
+    types:
+      - completed
 
 env:
-  OFFICIAL_IMAGE: tindy2013/subconverter:latest
   REGISTRY: ghcr.io
-  OWNER: djkyc                # 改为您的 GitHub 用户名
-  REPO: subconverter          # 改为您的仓库名
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  push:
+  build:
     runs-on: ubuntu-latest
+    # 👇 【新增判断】如果是被同步脚本触发的，只有同步成功（success）才执行打包；如果是正常的 push/手动触发，直接执行
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     permissions:
       contents: read
       packages: write
 
     steps:
-      - name: Checkout (only needed if you have custom files)
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Log in to GHCR
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Pull official image
-        run: docker pull ${{ env.OFFICIAL_IMAGE }}
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) || github.event_name == 'workflow_run' }}
+            type=semver,pattern={{version}}
+            type=sha,prefix={{branch}}-
 
-      - name: Tag for GHCR
-        run: |
-          docker tag ${{ env.OFFICIAL_IMAGE }} ${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.REPO }}:latest
-          # 如果官方镜像有版本标签，也可以同步过来（可选）
-          docker tag ${{ env.OFFICIAL_IMAGE }} ${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.REPO }}:$(date +%Y%m%d)
-
-      - name: Push to GHCR
-        run: |
-          docker push ${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.REPO }}:latest
-          docker push ${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.REPO }}:$(date +%Y%m%d)
+      - name: Build and push multi-arch image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.alpine
+          platforms: linux/amd64, linux/arm64, linux/arm/v7
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
