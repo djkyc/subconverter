@@ -1,9 +1,9 @@
-# 第一阶段：构建环境（Alpine 作为编译镜像）
+# 第一阶段：构建环境
 FROM alpine:latest AS builder
 
 LABEL maintainer="your-email@example.com"
 
-# 安装编译工具链和依赖库
+# 安装编译工具链和依赖库（包括 curl）
 RUN apk add --no-cache \
     git \
     cmake \
@@ -12,28 +12,29 @@ RUN apk add --no-cache \
     openssl-dev \
     pcre-dev \
     zlib-dev \
+    curl-dev \
     linux-headers \
     ca-certificates
 
 WORKDIR /app
 
-# 克隆源代码到当前目录（/app）
+# 克隆源代码到当前目录
 RUN git clone https://github.com/asdlokj1qpi233/subconverter.git .
 
-# 编译项目（直接在当前目录执行 cmake）
-# 建议先尝试静态链接，如果失败可以去掉 -static
-RUN cmake -DCMAKE_EXE_LINKER_FLAGS="-static" . \
+# 编译项目（动态链接，先保证能编译通过）
+RUN cmake . \
     && make -j$(nproc)
 
-# 第二阶段：运行环境（最小的 Alpine 镜像）
+# 第二阶段：运行环境
 FROM alpine:latest
 
-# 运行时依赖（如果静态链接成功，可以删除下面这行以进一步减小体积）
+# 运行时依赖（与编译时的动态库对应）
 RUN apk add --no-cache \
     ca-certificates \
     libssl3 \
     libpcrecpp \
-    zlib
+    zlib \
+    libcurl
 
 # 从构建阶段复制编译好的二进制文件
 COPY --from=builder /app/subconverter /subconverter
